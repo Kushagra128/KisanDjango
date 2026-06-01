@@ -1,0 +1,33 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Environment — NEVER commit real credentials
+.env
+
+# ML model cache — large files, not needed in repo
+.cache/
+~/
+
+# Vosk model — large binary, download separately
+vosk-model-small-hi-0.22/
+
+# Django
+*.sqlite3
+staticfiles/
+media/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

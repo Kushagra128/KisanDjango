@@ -1,0 +1,26 @@
+# ── Django core ───────────────────────────────────────────────────────────────
+django==5.0.6
+djangorestframework==3.15.2
+django-cors-headers==4.4.0
+dj-database-url==2.2.0
+whitenoise==6.7.0           # static file serving without nginx in dev/staging
+
+# ── Production server ─────────────────────────────────────────────────────────
+gunicorn==22.0.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+psycopg[binary]==3.2.6
+pgvector==0.4.2              # pgvector-django uses this package
+
+# ── Environment ───────────────────────────────────────────────────────────────
+python-dotenv==1.1.0
+python-multipart==0.0.20     # for file upload handling
+
+# ── Semantic search ───────────────────────────────────────────────────────────
+sentence-transformers==3.4.1
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+numpy==1.26.4
+
+# ── Voice STT (offline Hindi) ─────────────────────────────────────────────────
+vosk==0.3.45

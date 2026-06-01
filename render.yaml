@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: kisan-ai-django
+    env: python
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: gunicorn kisan.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: kisan.settings
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kisan-db
+          property: connectionString
+      - key: DEBUG
+        value: "False"
+      - key: MAX_CONCURRENT_REQUESTS
+        value: "10"
+      - key: DISABLE_EMBEDDINGS
+        value: "false"
