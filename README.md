@@ -54,14 +54,23 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env — set DATABASE_URL and DJANGO_SECRET_KEY
 
-# 4. Run migrations (Django creates auth/session/admin tables only;
+# 4. SECRET_KEY:
+python -c "import secrets; print(secrets.token_urlsafe(50))"
+
+# 5. Verify database connection:
+python manage.py dbshell
+
+# 6. Run migrations (Django creates auth/session/admin tables only;
 #    your existing 'solutions' table is untouched because managed=False)
 python manage.py migrate
 
-# 5. Create admin superuser
+# 7. Enable pgvector & create the similarity index
+(Invoke-WebRequest -Uri http://localhost:8000/init-db -Method POST).Content
+
+# 8. Create admin superuser
 python manage.py createsuperuser
 
-# 6. Run dev server
+# 9. Run dev server
 python manage.py runserver
 ```
 
