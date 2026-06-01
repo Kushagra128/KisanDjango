@@ -40,10 +40,14 @@ KisanAPI/                          ← project root (run everything from here)
 
 ```bash
 # 1. Create & activate venv
-python -m venv .venv
+py -3.12 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
 # 2. Install dependencies
+pip install -r requirements.txt
+
+# if failed try:
+pip install torch==2.6.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
 
 # 3. Configure environment
