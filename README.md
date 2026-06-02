@@ -41,7 +41,7 @@ KisanAPI/                          ← project root (run everything from here)
 ```bash
 # 1. Create & activate venv
 py -3.12 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+.venv\Scripts\activate
 
 # 2. Install dependencies
 pip install -r requirements.txt
