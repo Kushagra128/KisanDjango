@@ -112,6 +112,11 @@ Visit `http://localhost:8000/admin/` for the admin panel.
 | POST   | `/search`              | Top-1 result (chatbot mode)              |
 | POST   | `/voice`               | WAV → Hindi transcript                   |
 | POST   | `/voice-search`        | WAV → transcript → crop solution         |
+| GET    | `/docs/`               | Swagger UI — interactive API docs        |
+| GET    | `/schema/`             | OpenAPI 3 JSON schema (raw)              |
+| GET    | `/admin/`              | Django admin panel                       |
+
+> **Interactive docs:** visit `http://localhost:8000/docs/` to explore and test all endpoints in the browser — includes a file upload picker for `/voice` and `/voice-search`, a text input for `/search`, and live response previews.
 
 ---
 
