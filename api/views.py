@@ -27,9 +27,12 @@ import time
 from django.conf import settings
 from django.http import FileResponse, JsonResponse
 from django.db import connection, OperationalError, DatabaseError
+from rest_framework import serializers
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
+from drf_spectacular.openapi import AutoSchema
 
 import services
 from embedding_service import embedding_generator
@@ -40,6 +43,30 @@ logger = logging.getLogger(__name__)
 # ── Voice concurrency limiter ─────────────────────────────────────────────────
 _MAX_VOICE = getattr(settings, "MAX_CONCURRENT_VOICE", 10)
 _voice_semaphore = threading.Semaphore(_MAX_VOICE)
+
+
+# ── Reusable response serializers (for Swagger docs) ─────────────────────────
+
+class SolutionResponseSerializer(serializers.Serializer):
+    id               = serializers.IntegerField()
+    cropname         = serializers.CharField()
+    problem          = serializers.CharField()
+    solution         = serializers.CharField()
+    similarity_score = serializers.FloatField(allow_null=True)
+    search_method    = serializers.CharField(allow_null=True)
+    detected_crop    = serializers.CharField(allow_null=True)
+
+class HealthResponseSerializer(serializers.Serializer):
+    status              = serializers.CharField()
+    model_loaded        = serializers.BooleanField()
+    database_connected  = serializers.BooleanField()
+    voice_model_loaded  = serializers.BooleanField()
+
+class SearchPostSerializer(serializers.Serializer):
+    q = serializers.CharField(help_text="Crop problem query in Hindi or English. Example: टमाटर में कीड़े लग गए हैं")
+
+class VoiceUploadSerializer(serializers.Serializer):
+    audio = serializers.FileField(help_text="WAV audio file (16-bit mono, 16kHz recommended, max 10 MB)")
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -70,6 +97,7 @@ class ChatbotView(APIView):
 class HealthView(APIView):
     """GET /health — liveness + readiness check."""
 
+    @extend_schema(responses=HealthResponseSerializer)
     def get(self, request):
         model_loaded = embedding_generator.is_model_loaded()
         voice_loaded = voice_service.is_model_loaded()
@@ -195,6 +223,7 @@ class GenerateEmbeddingsView(APIView):
 class AllCropsView(APIView):
     """GET /all — return every record (paginated by DB, no filter)."""
 
+    @extend_schema(responses=SolutionResponseSerializer(many=True))
     def get(self, request):
         results = services.get_all_crops()
         return Response([_result_to_dict(r) for r in results])
@@ -220,6 +249,18 @@ class SearchView(APIView):
             )
         return detected_crop, None
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="q",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Crop problem query in Hindi or English. Example: टमाटर में कीड़े लग गए हैं",
+            )
+        ],
+        responses=SolutionResponseSerializer(many=True),
+    )
     def get(self, request):
         query = request.query_params.get("q", "").strip()
         if not query:
@@ -263,6 +304,10 @@ class SearchView(APIView):
                 status=500,
             )
 
+    @extend_schema(
+        request=SearchPostSerializer,
+        responses=SolutionResponseSerializer,
+    )
     def post(self, request):
         query = (request.data.get("q") or "").strip()
         if not query:
@@ -320,6 +365,16 @@ class VoiceView(APIView):
     ALLOWED_CONTENT_TYPES = {"audio/wav", "audio/wave", "audio/x-wav", "application/octet-stream"}
     MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 
+    @extend_schema(
+        request=VoiceUploadSerializer,
+        responses=inline_serializer(
+            name="VoiceResponse",
+            fields={
+                "transcript": serializers.CharField(),
+                "success": serializers.BooleanField(),
+            },
+        ),
+    )
     def post(self, request):
         audio_file = request.FILES.get("audio")
         if not audio_file:
@@ -389,6 +444,16 @@ class VoiceSearchView(APIView):
     ALLOWED_CONTENT_TYPES = {"audio/wav", "audio/wave", "audio/x-wav", "application/octet-stream"}
     MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
+    @extend_schema(
+        request=VoiceUploadSerializer,
+        responses=inline_serializer(
+            name="VoiceSearchResponse",
+            fields={
+                "transcript": serializers.CharField(),
+                "result": SolutionResponseSerializer(),
+            },
+        ),
+    )
     def post(self, request):
         start = time.time()
 

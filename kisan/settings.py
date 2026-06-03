@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
+    "drf_spectacular",
     "api",
 ]
 
@@ -131,12 +132,13 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PARSER_CLASSES": [
         "rest_framework.parsers.JSONParser",
-        "rest_framework.parsers.MultiPartParser",  # needed for file uploads
+        "rest_framework.parsers.MultiPartParser",
         "rest_framework.parsers.FormParser",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": [],
     "EXCEPTION_HANDLER": "api.exceptions.custom_exception_handler",
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 # ── Voice / ML settings ───────────────────────────────────────────────────────
@@ -164,4 +166,13 @@ LOGGING = {
         "handlers": ["console"],
         "level": "INFO",
     },
+}
+
+# ── API Docs (drf-spectacular) ────────────────────────────────────────────────
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Kisan AI API",
+    "DESCRIPTION": "Hindi crop advisory API with semantic search and offline voice STT.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
 }
