@@ -66,7 +66,9 @@ class SearchPostSerializer(serializers.Serializer):
     q = serializers.CharField(help_text="Crop problem query in Hindi or English. Example: टमाटर में कीड़े लग गए हैं")
 
 class VoiceUploadSerializer(serializers.Serializer):
-    audio = serializers.FileField(help_text="WAV audio file (16-bit mono, 16kHz recommended, max 10 MB)")
+    audio = serializers.FileField(
+        help_text="WAV audio file (16-bit mono, 16kHz recommended, max 10 MB)"
+    )
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -366,7 +368,19 @@ class VoiceView(APIView):
     MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 
     @extend_schema(
-        request=VoiceUploadSerializer,
+        request={
+            "multipart/form-data": {
+                "type": "object",
+                "properties": {
+                    "audio": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "WAV audio file (16-bit mono, 16kHz recommended, max 10 MB)",
+                    }
+                },
+                "required": ["audio"],
+            }
+        },
         responses=inline_serializer(
             name="VoiceResponse",
             fields={
@@ -445,7 +459,19 @@ class VoiceSearchView(APIView):
     MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
     @extend_schema(
-        request=VoiceUploadSerializer,
+        request={
+            "multipart/form-data": {
+                "type": "object",
+                "properties": {
+                    "audio": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "WAV audio file (16-bit mono, 16kHz recommended, max 10 MB)",
+                    }
+                },
+                "required": ["audio"],
+            }
+        },
         responses=inline_serializer(
             name="VoiceSearchResponse",
             fields={
