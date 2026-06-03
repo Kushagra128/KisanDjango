@@ -96,53 +96,27 @@ class EmbeddingGenerator:
 
     def _load_with_snapshot(self, cache_dir: str) -> None:
         """
-        Load the model. Tries these strategies in order:
-          1. Load directly from an already-downloaded snapshot (fastest, no network)
-          2. snapshot_download then load from local path
-          3. Direct SentenceTransformer load (fallback)
+        Load model directly using SentenceTransformer.
+
+        This avoids downloading:
+        - ONNX exports (~2.4GB)
+        - OpenVINO exports (~0.5GB)
+        - TensorFlow weights (~0.4GB)
+
+        and only downloads the files actually needed for inference.
         """
-        import glob
 
-        # ── Strategy 1: snapshot already on disk ─────────────────────────────
-        # HF stores files in:
-        #   <cache_dir>/models--<org>--<name>/snapshots/<hash>/
-        # If any snapshot dir exists and has config.json, load from it directly.
-        model_slug = self.MODEL_NAME.replace("/", "--")
-        snapshot_glob = os.path.join(
-            cache_dir, f"models--{model_slug}", "snapshots", "*", "config.json"
+        logger.info(f"Loading model: {self.MODEL_NAME}")
+
+        model = SentenceTransformer(
+            self.MODEL_NAME,
+            cache_folder=cache_dir,
+            device="cpu",
         )
-        existing_snapshots = sorted(glob.glob(snapshot_glob))
-
-        if existing_snapshots:
-            local_path = os.path.dirname(existing_snapshots[-1])  # most recent snapshot
-            logger.info(f"Loading from existing snapshot: {local_path}")
-            model = SentenceTransformer(local_path, device="cpu")
-            model.eval()
-            self._model = model
-            logger.info("✅ Model loaded from local snapshot.")
-            return
-
-        # ── Strategy 2: download via snapshot_download ────────────────────────
-        try:
-            from huggingface_hub import snapshot_download
-            logger.info("Downloading model snapshot…")
-            local_path = snapshot_download(
-                repo_id=self.MODEL_NAME,
-                cache_dir=cache_dir,
-            )
-            logger.info(f"Snapshot downloaded to: {local_path}")
-            model = SentenceTransformer(local_path, device="cpu")
-        except Exception as snap_exc:
-            # ── Strategy 3: direct load (last resort) ─────────────────────────
-            logger.warning(f"snapshot_download failed ({snap_exc}), falling back to direct load")
-            model = SentenceTransformer(
-                self.MODEL_NAME,
-                cache_folder=cache_dir,
-                device="cpu",
-            )
 
         model.eval()
         self._model = model
+
         logger.info("✅ Model loaded successfully on CPU.")
 
     def is_model_loaded(self) -> bool:
