@@ -305,8 +305,37 @@ SYMPTOM_KEYWORDS: dict[str, list[str]] = {
     "taste":         ["स्वाद", "taste", "flavor", "पकने"],
 }
 
-BOOST_PER_MATCH = 0.30   # score added per matching symptom category (increased significantly)
-MAX_BOOST      = 0.90    # cap total boost (increased significantly)
+BOOST_PER_MATCH = 0.30   # score added per matching symptom category
+MAX_BOOST      = 0.90    # cap total boost
+
+# ── Minimum score to return a result ─────────────────────────────────────────
+# Final score (embedding + boost) must meet this to be shown to the user.
+# Below this → treated as "no relevant answer found".
+MIN_RETURN_SCORE = 0.55
+
+# ── Support contact message (shown when no answer is found) ──────────────────
+NO_ANSWER_MESSAGE = (
+    "क्षमा करें, इस समस्या का समाधान हमारे डेटाबेस में उपलब्ध नहीं है।\n"
+    "अधिक सहायता के लिए कृपया हमारे कृषि विशेषज्ञ से संपर्क करें:\n"
+    "📞 किसान हेल्पलाइन: 1800-180-1551 (टोल फ्री)\n"
+    "🌐 या नज़दीकी कृषि विभाग कार्यालय से मिलें।"
+)
+
+# ── General / how-to query indicators ────────────────────────────────────────
+# If query contains these words but NO symptom keyword → it's a general question,
+# not a problem query. Return the support message instead of a wrong result.
+GENERAL_QUERY_INDICATORS = [
+    # Hindi general question words
+    "कैसे", "कैसा", "कैसी", "कब", "कहाँ", "कहां", "कितना", "कितनी",
+    "कितने", "क्यों", "क्या होता", "बताएं", "बताओ", "जानकारी",
+    "उगाये", "उगाएं", "उगाना", "उगाए", "लगाएं", "लगाना", "लगाये",
+    "करें", "करना", "करो", "विधि", "तरीका", "तरीके", "प्रक्रिया",
+    "फायदे", "नुकसान", "लाभ", "उपयोग", "खेती", "बुवाई कब",
+    # English general question words
+    "how to", "how do", "when to", "where to", "what is", "tell me",
+    "explain", "guide", "tips", "method", "process", "grow", "plant",
+    "cultivation", "farming", "harvest", "benefits",
+]
 
 
 def detect_crop(query: str) -> Optional[str]:
@@ -352,6 +381,37 @@ def detect_crop(query: str) -> Optional[str]:
 
     logger.info(f"No crop detected in query: '{query}'")
     return None
+
+
+def classify_query(query: str) -> str:
+    """
+    Classify query intent before searching.
+
+    Returns:
+        "problem"  — query describes a crop problem (proceed to search)
+        "general"  — general how-to / informational question (skip search)
+
+    Logic:
+        - If query contains ANY symptom keyword → always treat as "problem"
+          (symptom keywords are strong indicators regardless of other words)
+        - Else if query contains a general indicator word → "general"
+        - Otherwise → "problem" (give benefit of doubt, let threshold filter it)
+    """
+    query_lower = query.lower()
+
+    # Check for symptom keywords first — these override everything
+    for keywords in SYMPTOM_KEYWORDS.values():
+        if any(kw in query_lower for kw in keywords):
+            logger.info(f"Query classified as 'problem' (symptom keyword match)")
+            return "problem"
+
+    # Check for general question indicators
+    for indicator in GENERAL_QUERY_INDICATORS:
+        if indicator in query_lower:
+            logger.info(f"Query classified as 'general' (indicator: '{indicator}')")
+            return "general"
+
+    return "problem"
 
 
 def keyword_boost(query: str, problem: str) -> float:
@@ -413,7 +473,7 @@ def search_crop_solution_semantic(
     db,
     user_question: str,
     limit: int = 10,
-    threshold: float = 0.15,  # Lowered from 0.2 to include more candidates
+    threshold: float = 0.8,  # Lowered from 0.2 to include more candidates
     crop_filter: Optional[str] = None,
 ) -> List[Tuple[CropResult, float]]:
     """
@@ -494,17 +554,27 @@ def search_crop_solution_semantic(
         scored.append((crop_obj, final))
         
         # Log top candidates with their scores
-        if len(scored) <= 5:
+        if len(scored) <= 8:
             logger.info(f"  Candidate ID {row.id}: emb={row.emb_score:.4f} → final={final:.4f}")
 
     # Sort by final score descending
     scored.sort(key=lambda x: x[1], reverse=True)
 
-    # ── Step 3: Return top limit ───────────────────────────────────────────────
+    # ── Step 3: Return top limit — apply minimum score filter ────────────────
     top = scored[:limit]
+
+    # Filter by minimum return score — discard low-confidence results
+    top = [(obj, score) for obj, score in top if score >= MIN_RETURN_SCORE]
+
+    if not top:
+        logger.warning(
+            f"All candidates below MIN_RETURN_SCORE={MIN_RETURN_SCORE} — returning empty"
+        )
+        return []
+
     logger.info(
         f"After re-ranking: top score={top[0][1]:.4f}, "
-        f"bottom score={top[-1][1]:.4f}"
+        f"bottom score={top[-1][1]:.4f}, returned={len(top)}"
     )
     return top
 
@@ -525,14 +595,22 @@ def search_crop_solution(db, user_question: str) -> List[CropResult]:
     Main search entry point.
 
     Flow:
-      1. Detect crop
-      2. Hybrid retrieval (vector + keyword boost)
-      3. ILIKE fallback if semantic returns nothing
+      1. Classify query intent (problem vs general question)
+      2. Detect crop name
+      3. Hybrid retrieval (vector + keyword boost + MIN_RETURN_SCORE filter)
+      4. ILIKE fallback if semantic returns nothing
+      5. Return empty list if no match → caller shows NO_ANSWER_MESSAGE
 
     Returns:
-        List[CropResult] with similarity_score, search_method, detected_crop attached
+        List[CropResult] — empty list means "no answer found"
     """
     start_time = time.time()
+
+    # ── Fix 1: Query intent classification ───────────────────────────────────
+    intent = classify_query(user_question)
+    if intent == "general":
+        logger.info(f"General query detected, skipping search: '{user_question}'")
+        return []  # caller will show NO_ANSWER_MESSAGE
 
     detected_crop = detect_crop(user_question)
     if detected_crop:
@@ -544,7 +622,7 @@ def search_crop_solution(db, user_question: str) -> List[CropResult]:
             db,
             user_question,
             crop_filter=detected_crop,
-            threshold=0.2,
+            threshold=0.8,
             limit=10,
         )
 

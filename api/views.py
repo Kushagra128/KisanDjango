@@ -238,16 +238,37 @@ class SearchView(APIView):
     """
 
     def _run_search(self, query: str):
-        """Shared search logic; returns (results_list_or_none, error_response_or_none)."""
+        """
+        Shared search logic.
+        Returns (detected_crop, None) on success path,
+        or (None, error_Response) if query is invalid.
+        General queries and no-crop queries both get the support message.
+        """
+        # Fix 1: classify intent — general questions skip search entirely
+        intent = services.classify_query(query)
+        if intent == "general":
+            return None, Response(
+                {
+                    "message": services.NO_ANSWER_MESSAGE,
+                    "query": query,
+                    "type": "general_query",
+                },
+                status=200,  # not an error — a valid response
+            )
+
         detected_crop = services.detect_crop(query)
         if not detected_crop:
             return None, Response(
                 {
-                    "message": "फसल का नाम स्पष्ट नहीं है। कृपया अपने प्रश्न में फसल का नाम लिखें।",
-                    "hint": "उदाहरण: 'टमाटर में कीड़े लग गए हैं' या 'wheat disease treatment'",
+                    "message": (
+                        "फसल का नाम स्पष्ट नहीं है। कृपया अपने प्रश्न में फसल का नाम लिखें।\n"
+                        "उदाहरण: 'टमाटर में कीड़े लग गए हैं' या 'wheat disease treatment'\n\n"
+                        + services.NO_ANSWER_MESSAGE
+                    ),
                     "query": query,
+                    "type": "no_crop_detected",
                 },
-                status=400,
+                status=200,
             )
         return detected_crop, None
 
@@ -289,8 +310,13 @@ class SearchView(APIView):
                 return Response([_result_to_dict(r, detected_crop) for r in results])
 
             return Response(
-                {"message": "कोई समाधान नहीं मिला", "query": query, "detected_crop": detected_crop},
-                status=404,
+                {
+                    "message": services.NO_ANSWER_MESSAGE,
+                    "query": query,
+                    "detected_crop": detected_crop,
+                    "type": "no_result",
+                },
+                status=200,
             )
 
         except (OperationalError, DatabaseError) as exc:
@@ -336,8 +362,13 @@ class SearchView(APIView):
                 return Response(_result_to_dict(results[0], detected_crop))
 
             return Response(
-                {"message": "कोई समाधान नहीं मिला", "query": query, "detected_crop": detected_crop},
-                status=404,
+                {
+                    "message": services.NO_ANSWER_MESSAGE,
+                    "query": query,
+                    "detected_crop": detected_crop,
+                    "type": "no_result",
+                },
+                status=200,
             )
 
         except (OperationalError, DatabaseError) as exc:
@@ -551,8 +582,13 @@ class VoiceSearchView(APIView):
                 )
 
             return Response(
-                {"transcript": transcript, "result": None, "message": "कोई समाधान नहीं मिला"},
-                status=404,
+                {
+                    "transcript": transcript,
+                    "result": None,
+                    "message": services.NO_ANSWER_MESSAGE,
+                    "type": "no_result",
+                },
+                status=200,
             )
 
         except (OperationalError, DatabaseError) as exc:
