@@ -296,7 +296,7 @@ SYMPTOM_KEYWORDS: dict[str, list[str]] = {
     "white_fly":     ["सफ़ेद", "सफेद", "white", "whitefly"],
     "fungus":        ["फफूंद", "fungus", "fungal", "mold"],
     "termite":       ["दीमक", "termite"],
-    "growth":        ["बढ़", "growth", "grow", "नहीं बढ़"],
+    "growth":        ["बढ़", "growth", "नहीं बढ़"],
     "seed":          ["बीज", "seed", "sowing", "बुवाई", "बोन"],
     "irrigation":    ["सिंचाई", "पानी", "irrigation", "water"],
     "fertilizer":    ["खाद", "उर्वरक", "fertilizer", "nutrient"],
@@ -325,7 +325,7 @@ NO_ANSWER_MESSAGE = (
 # These words suggest a general/informational question ONLY when no problem
 # context is present. They are checked LAST — problem context always wins.
 GENERAL_QUERY_INDICATORS = [
-    # Hindi — clearly general farming / cultivation intent
+    # Hindi script — clearly general farming / cultivation intent
     "उगाये", "उगाएं", "उगाना", "उगाए",
     "लगाएं", "लगाना", "लगाये",
     "विधि", "तरीका", "तरीके", "प्रक्रिया",
@@ -333,6 +333,12 @@ GENERAL_QUERY_INDICATORS = [
     "खेती करें", "खेती करना", "खेती कैसे",
     "बुवाई कैसे", "बुवाई कब",
     "कब बोएं", "कब लगाएं", "कब उगाएं",
+    # Hinglish (transliterated) — common user input style
+    "kheti kaise", "kheti karna", "kheti kare",
+    "kaise ugaye", "kaise ugayen", "kaise lagaye",
+    "kab boye", "kab lagaye", "kab ugaye",
+    "tarika batao", "vidhi batao", "kaise kare",
+    "ugane ka tarika", "lagane ka tarika",
     # English — clearly general
     "how to grow", "how to plant", "how to cultivate",
     "cultivation method", "farming method", "when to sow",
@@ -354,6 +360,12 @@ PROBLEM_CONTEXT_WORDS = [
     "कमज़ोर", "कमजोर", "कम", "छोटे", "पतले",
     "खरपतवार", "दीमक", "कीड़", "कीट",
     "पाला", "पाले", "ठंड", "लू", "तेज़ धूप",
+    # Hinglish problem context
+    "bachao", "bachaye", "bachana", "upay", "upchar", "ilaj",
+    "rog", "bimari", "nuksan", "kharab", "mar raha", "sukh raha",
+    "peela", "peele", "kala", "dhabba", "dhabba", "kide", "kida",
+    "sad raha", "gal raha", "jhad raha", "gir raha",
+    "dawai", "dawa", "spray kare", "chidkav",
     # English problem context
     "protect", "protection", "prevent", "treatment", "cure",
     "disease", "damage", "pest", "attack", "control",
@@ -516,7 +528,7 @@ def search_crop_solution_semantic(
     db,
     user_question: str,
     limit: int = 10,
-    threshold: float = 0.8,  # Lowered from 0.2 to include more candidates
+    threshold: float = 0.15,  # pgvector candidate pool — cast wide net
     crop_filter: Optional[str] = None,
 ) -> List[Tuple[CropResult, float]]:
     """
@@ -665,7 +677,7 @@ def search_crop_solution(db, user_question: str) -> List[CropResult]:
             db,
             user_question,
             crop_filter=detected_crop,
-            threshold=0.8,
+            threshold=0.15,
             limit=10,
         )
 
