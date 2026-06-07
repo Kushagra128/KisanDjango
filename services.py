@@ -326,19 +326,32 @@ NO_ANSWER_MESSAGE = (
 # context is present. They are checked LAST — problem context always wins.
 GENERAL_QUERY_INDICATORS = [
     # Hindi script — clearly general farming / cultivation intent
-    "उगाये", "उगाएं", "उगाना", "उगाए",
-    "लगाएं", "लगाना", "लगाये",
+    # "उगाना" verb family — all common forms
+    "उगाये", "उगाएं", "उगाना", "उगाए", "उगाया", "उगाई",
+    "उगाया जाता", "उगाई जाती", "उगाये जाते",
+    "उगाने का", "उगाने की", "उगाने के",
+    # "लगाना" verb family
+    "लगाएं", "लगाना", "लगाये", "लगाया जाता", "लगाने का",
+    # "करना" general farming phrases
     "विधि", "तरीका", "तरीके", "प्रक्रिया",
     "फायदे", "लाभ", "उपयोग",
-    "खेती करें", "खेती करना", "खेती कैसे",
+    "खेती करें", "खेती करना", "खेती कैसे", "खेती कैसे करें",
+    "खेती किस तरह", "खेती का तरीका",
     "बुवाई कैसे", "बुवाई कब",
     "कब बोएं", "कब लगाएं", "कब उगाएं",
+    "कैसे करें खेती", "कैसे उगाएं", "कैसे उगायें",
+    "कैसे उगाया", "कैसे उगाई", "कैसे लगाएं",
+    "जाता है कैसे", "जाती है कैसे",
+    "कैसे होती है", "कैसे होता है",
     # Hinglish (transliterated) — common user input style
     "kheti kaise", "kheti karna", "kheti kare",
     "kaise ugaye", "kaise ugayen", "kaise lagaye",
-    "kab boye", "kab lagaye", "kab ugaye",
-    "tarika batao", "vidhi batao", "kaise kare",
+    "kaise ugaya", "kaise ugai", "kab boye",
+    "kab lagaye", "kab ugaye",
+    "tarika batao", "vidhi batao",
     "ugane ka tarika", "lagane ka tarika",
+    "kaise hoti hai", "kaise hota hai",
+    "kaise ki jati hai", "kaise kiya jata",
     # English — clearly general
     "how to grow", "how to plant", "how to cultivate",
     "cultivation method", "farming method", "when to sow",
