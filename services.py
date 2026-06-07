@@ -322,19 +322,42 @@ NO_ANSWER_MESSAGE = (
 )
 
 # ── General / how-to query indicators ────────────────────────────────────────
-# If query contains these words but NO symptom keyword → it's a general question,
-# not a problem query. Return the support message instead of a wrong result.
+# These words suggest a general/informational question ONLY when no problem
+# context is present. They are checked LAST — problem context always wins.
 GENERAL_QUERY_INDICATORS = [
-    # Hindi general question words
-    "कैसे", "कैसा", "कैसी", "कब", "कहाँ", "कहां", "कितना", "कितनी",
-    "कितने", "क्यों", "क्या होता", "बताएं", "बताओ", "जानकारी",
-    "उगाये", "उगाएं", "उगाना", "उगाए", "लगाएं", "लगाना", "लगाये",
-    "करें", "करना", "करो", "विधि", "तरीका", "तरीके", "प्रक्रिया",
-    "फायदे", "नुकसान", "लाभ", "उपयोग", "खेती", "बुवाई कब",
-    # English general question words
-    "how to", "how do", "when to", "where to", "what is", "tell me",
-    "explain", "guide", "tips", "method", "process", "grow", "plant",
-    "cultivation", "farming", "harvest", "benefits",
+    # Hindi — clearly general farming / cultivation intent
+    "उगाये", "उगाएं", "उगाना", "उगाए",
+    "लगाएं", "लगाना", "लगाये",
+    "विधि", "तरीका", "तरीके", "प्रक्रिया",
+    "फायदे", "लाभ", "उपयोग",
+    "खेती करें", "खेती करना", "खेती कैसे",
+    "बुवाई कैसे", "बुवाई कब",
+    "कब बोएं", "कब लगाएं", "कब उगाएं",
+    # English — clearly general
+    "how to grow", "how to plant", "how to cultivate",
+    "cultivation method", "farming method", "when to sow",
+    "when to harvest", "benefits of", "advantages of",
+]
+
+# ── Problem context words ─────────────────────────────────────────────────────
+# If ANY of these appear in the query, it is a PROBLEM query regardless of
+# any general indicator words also present.
+PROBLEM_CONTEXT_WORDS = [
+    # Protection / treatment intent (these appear in how-to problem queries)
+    "बचायें", "बचाएं", "बचाव", "बचाना", "उपाय", "समाधान", "इलाज",
+    "रोकें", "रोकना", "दवाई", "दवा", "छिड़काव", "उपचार",
+    # Damage / disease words not in SYMPTOM_KEYWORDS
+    "रोग", "बीमारी", "नुकसान", "खराब", "मर", "नष्ट",
+    "काला", "भूरा", "लाल धब्बे", "धब्बे", "धब्बा",
+    "फट", "टूट", "गिर", "झड़", "सड़", "गल",
+    "पीला", "पीले", "सूख", "मुरझा",
+    "कमज़ोर", "कमजोर", "कम", "छोटे", "पतले",
+    "खरपतवार", "दीमक", "कीड़", "कीट",
+    "पाला", "पाले", "ठंड", "लू", "तेज़ धूप",
+    # English problem context
+    "protect", "protection", "prevent", "treatment", "cure",
+    "disease", "damage", "pest", "attack", "control",
+    "black", "yellow", "rot", "wilt", "blight", "fungus",
 ]
 
 
@@ -391,26 +414,46 @@ def classify_query(query: str) -> str:
         "problem"  — query describes a crop problem (proceed to search)
         "general"  — general how-to / informational question (skip search)
 
-    Logic:
-        - If query contains ANY symptom keyword → always treat as "problem"
-          (symptom keywords are strong indicators regardless of other words)
-        - Else if query contains a general indicator word → "general"
-        - Otherwise → "problem" (give benefit of doubt, let threshold filter it)
+    Three-layer logic (checked in order, first match wins):
+
+      Layer 1 — SYMPTOM keywords (SYMPTOM_KEYWORDS dict)
+                Any symptom word → always "problem"
+                e.g. "केले में कीड़े", "पत्ते पीले"
+
+      Layer 2 — PROBLEM CONTEXT words (PROBLEM_CONTEXT_WORDS list)
+                Damage/protection/disease words → always "problem"
+                Catches how-to problem queries like:
+                  "पाले से कैसे बचायें" → बचायें = problem context → "problem"
+                  "पीले पत्तों का उपाय" → उपाय = problem context → "problem"
+
+      Layer 3 — GENERAL indicators (GENERAL_QUERY_INDICATORS list)
+                Only reaches here if layers 1 and 2 both missed.
+                Specific cultivation/farming phrases → "general"
+                e.g. "खेती कैसे करें", "केले कैसे उगाएं"
+
+      Default → "problem" (give benefit of doubt, let threshold handle it)
     """
     query_lower = query.lower()
 
-    # Check for symptom keywords first — these override everything
+    # Layer 1: symptom keywords — strongest signal
     for keywords in SYMPTOM_KEYWORDS.values():
         if any(kw in query_lower for kw in keywords):
-            logger.info(f"Query classified as 'problem' (symptom keyword match)")
+            logger.info("Query classified as 'problem' (symptom keyword)")
             return "problem"
 
-    # Check for general question indicators
+    # Layer 2: problem context words — overrides general indicators
+    for word in PROBLEM_CONTEXT_WORDS:
+        if word in query_lower:
+            logger.info(f"Query classified as 'problem' (problem context: '{word}')")
+            return "problem"
+
+    # Layer 3: clearly general farming/cultivation phrases
     for indicator in GENERAL_QUERY_INDICATORS:
         if indicator in query_lower:
             logger.info(f"Query classified as 'general' (indicator: '{indicator}')")
             return "general"
 
+    # Default: treat as problem, let confidence threshold filter poor matches
     return "problem"
 
 
