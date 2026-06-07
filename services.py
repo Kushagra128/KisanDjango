@@ -783,33 +783,30 @@ def search_crop_solution(db, user_question: str) -> List[CropResult]:
                 output.append(crop_obj)
             return output
 
-        logger.warning("Hybrid search returned no results, falling back to ILIKE")
+        # Semantic search ran but found nothing above threshold / overlap filter.
+        # Do NOT fall back to ILIKE here — that would return random crop records
+        # with no relevance. Return empty so caller shows the support message.
+        logger.warning("Hybrid search returned no results — returning empty (no ILIKE fallback)")
+        return []
 
     except Exception as e:
         logger.warning(f"Hybrid search failed: {e}, falling back to ILIKE")
 
-    # ── ILIKE fallback ────────────────────────────────────────────────────────
+    # ── ILIKE fallback — only reached on exception, not empty results ─────────
     try:
         from django.db import connection as django_conn
         with django_conn.cursor() as cursor:
-            if detected_crop:
-                cursor.execute(
-                    "SELECT id, problem, solution, cropname FROM solutions "                    "WHERE cropname = %s ORDER BY id ASC LIMIT 10",
-                    [detected_crop]
-                )
-                fallback_method = "fallback_crop"
-            else:
-                cursor.execute(
-                    "SELECT id, problem, solution, cropname FROM solutions "                    "WHERE problem ILIKE %s ORDER BY id ASC LIMIT 10",
-                    [f"%{user_question}%"]
-                )
-                fallback_method = "fallback"
+            cursor.execute(
+                "SELECT id, problem, solution, cropname FROM solutions "
+                "WHERE problem ILIKE %s ORDER BY id ASC LIMIT 5",
+                [f"%{user_question}%"]
+            )
             rows = cursor.fetchall()
 
         result = [CropResult(id=r[0], problem=r[1], solution=r[2], cropname=r[3]) for r in rows]
         for r in result:
             r.similarity_score = None
-            r.search_method    = fallback_method
+            r.search_method    = "fallback"
 
         elapsed_ms = (time.time() - start_time) * 1000
         logger.info(f"Fallback: {len(result)} results in {elapsed_ms:.2f}ms")
