@@ -534,6 +534,68 @@ def hybrid_score(embedding_score: float, query: str, problem: str) -> float:
     return round(score, 6)
 
 
+def _filter_by_word_overlap(
+    query: str,
+    scored: List[Tuple[CropResult, float]],
+    min_overlap: int = 1,
+) -> List[Tuple[CropResult, float]]:
+    """
+    Remove results whose problem text shares no meaningful content words
+    with the query beyond the crop name.
+
+    This catches false positives where pgvector returns a high score because
+    both query and problem share the crop name + question words (कैसे, में, के)
+    but the actual topic is different.
+
+    Strategy:
+      - Extract content tokens from query (length >= 3, not stopwords)
+      - For each result, count how many query tokens appear in the problem
+      - Keep result if overlap >= min_overlap OR if result is top-1 with
+        score >= HIGH_CONFIDENCE (to not discard clearly good results)
+    """
+    # Hindi + English stopwords to ignore in overlap check
+    STOPWORDS = {
+        "के", "की", "का", "में", "से", "को", "पर", "है", "हैं", "हो",
+        "रहे", "रहा", "रही", "गए", "गया", "गई", "लग", "हुए", "हुआ",
+        "कैसे", "कैसा", "क्यों", "कब", "कहाँ", "कितना", "और", "या",
+        "यह", "वह", "इस", "उस", "जो", "तो", "भी", "ही", "एक", "सभी",
+        "the", "is", "are", "in", "of", "to", "a", "an", "and", "or",
+        "for", "on", "at", "by", "how", "why", "when", "what", "where",
+    }
+    HIGH_CONFIDENCE = 1.0  # above this, always return regardless of overlap
+
+    query_lower = query.lower()
+    query_tokens = {
+        t for t in re.split(r'[\s,।?!\-]+', query_lower)
+        if len(t) >= 3 and t not in STOPWORDS
+    }
+
+    if not query_tokens:
+        return scored  # can't filter, return as-is
+
+    filtered = []
+    for crop_obj, score in scored:
+        problem_lower = crop_obj.problem.lower()
+
+        # Always keep high-confidence results (keyword boost pushed score > 1.0)
+        if score >= HIGH_CONFIDENCE:
+            filtered.append((crop_obj, score))
+            continue
+
+        # Count meaningful token overlap
+        overlap = sum(1 for token in query_tokens if token in problem_lower)
+
+        if overlap >= min_overlap:
+            filtered.append((crop_obj, score))
+        else:
+            logger.info(
+                f"  Dropped id={crop_obj.id} (overlap={overlap}/{len(query_tokens)}): "
+                f"'{crop_obj.problem[:60]}'"
+            )
+
+    return filtered
+
+
 def search_crop_solution_semantic(
     db,
     user_question: str,
@@ -635,6 +697,18 @@ def search_crop_solution_semantic(
         logger.warning(
             f"All candidates below MIN_RETURN_SCORE={MIN_RETURN_SCORE} — returning empty"
         )
+        return []
+
+    # ── Step 4: Word-overlap relevance check ──────────────────────────────────
+    # Even if score is high, verify the top result shares meaningful content
+    # words with the query. This catches cases where pgvector finds a high
+    # cosine score due to shared crop name + question words but the problem
+    # topic is completely different.
+    # e.g. query "केले कैसे उगाएं" → result "केले को पाले से बचाएं" (score 0.88)
+    # Both have "केले" + "कैसे" but completely different topics.
+    top = _filter_by_word_overlap(user_question, top)
+
+    if not top:
         return []
 
     logger.info(
