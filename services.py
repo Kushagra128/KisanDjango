@@ -538,58 +538,78 @@ def _filter_by_word_overlap(
     query: str,
     scored: List[Tuple[CropResult, float]],
     min_overlap: int = 1,
+    detected_crop: Optional[str] = None,
 ) -> List[Tuple[CropResult, float]]:
     """
-    Remove results whose problem text shares no meaningful content words
-    with the query beyond the crop name.
+    Remove results whose problem text shares no meaningful TOPIC words
+    with the query — after excluding crop name and stopwords.
 
-    This catches false positives where pgvector returns a high score because
-    both query and problem share the crop name + question words (कैसे, में, के)
-    but the actual topic is different.
+    The crop name is always shared (we searched by crop filter), so it
+    contributes no topical signal and must be excluded from the overlap check.
 
-    Strategy:
-      - Extract content tokens from query (length >= 3, not stopwords)
-      - For each result, count how many query tokens appear in the problem
-      - Keep result if overlap >= min_overlap OR if result is top-1 with
-        score >= HIGH_CONFIDENCE (to not discard clearly good results)
+    Example:
+      query  = "केले के पौधे को कैसे उगाये"
+      tokens after removing केला + stopwords = {"पौधे", "उगाये"}
+      result = "केले के पौधों को पाले से कैसे बचायें है ?"
+      overlap = 0 ("पौधे" is NOT in result, "उगाये" is NOT in result)
+      → dropped ✅
     """
-    # Hindi + English stopwords to ignore in overlap check
     STOPWORDS = {
         "के", "की", "का", "में", "से", "को", "पर", "है", "हैं", "हो",
         "रहे", "रहा", "रही", "गए", "गया", "गई", "लग", "हुए", "हुआ",
         "कैसे", "कैसा", "क्यों", "कब", "कहाँ", "कितना", "और", "या",
         "यह", "वह", "इस", "उस", "जो", "तो", "भी", "ही", "एक", "सभी",
+        "कृपया", "बताने", "बताएं", "बताओ", "करें", "करना", "करो",
         "the", "is", "are", "in", "of", "to", "a", "an", "and", "or",
         "for", "on", "at", "by", "how", "why", "when", "what", "where",
     }
-    HIGH_CONFIDENCE = 1.0  # above this, always return regardless of overlap
+    HIGH_CONFIDENCE = 1.0
 
     query_lower = query.lower()
+
+    # Collect crop name tokens to exclude from overlap (they're always shared)
+    crop_tokens: set = set()
+    if detected_crop:
+        crop_tokens = {
+            t for t in re.split(r'[\s,।?!\-]+', detected_crop.lower()) if t
+        }
+    # Also exclude all crop aliases (केला, केले, केलों all map to same crop)
+    if scored:
+        sample_cropname = scored[0][0].cropname.lower()
+        crop_tokens.update(
+            t for t in re.split(r'[\s,।?!\-]+', sample_cropname) if t
+        )
+
     query_tokens = {
         t for t in re.split(r'[\s,।?!\-]+', query_lower)
-        if len(t) >= 3 and t not in STOPWORDS
+        if len(t) >= 3 and t not in STOPWORDS and t not in crop_tokens
     }
 
     if not query_tokens:
-        return scored  # can't filter, return as-is
+        # After removing crop name + stopwords, nothing left to check
+        # Cannot determine topic → skip filter, return all
+        logger.info("No content tokens after removing crop/stopwords — skipping overlap filter")
+        return scored
+
+    logger.info(f"Overlap filter content tokens: {query_tokens}")
 
     filtered = []
     for crop_obj, score in scored:
         problem_lower = crop_obj.problem.lower()
 
-        # Always keep high-confidence results (keyword boost pushed score > 1.0)
+        # Always keep high-confidence results (keyword boost > 1.0)
         if score >= HIGH_CONFIDENCE:
             filtered.append((crop_obj, score))
             continue
 
-        # Count meaningful token overlap
         overlap = sum(1 for token in query_tokens if token in problem_lower)
 
         if overlap >= min_overlap:
             filtered.append((crop_obj, score))
         else:
             logger.info(
-                f"  Dropped id={crop_obj.id} (overlap={overlap}/{len(query_tokens)}): "
+                f"  Dropped id={crop_obj.id} "
+                f"(overlap={overlap}/{len(query_tokens)}): "
                 f"'{crop_obj.problem[:60]}'"
             )
 
@@ -706,7 +726,7 @@ def search_crop_solution_semantic(
     # topic is completely different.
     # e.g. query "केले कैसे उगाएं" → result "केले को पाले से बचाएं" (score 0.88)
     # Both have "केले" + "कैसे" but completely different topics.
-    top = _filter_by_word_overlap(user_question, top)
+    top = _filter_by_word_overlap(user_question, top, detected_crop=crop_filter)
 
     if not top:
         return []
