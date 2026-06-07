@@ -81,7 +81,7 @@ CROP_ALIASES: dict[str, str] = {
     "ख़रबूज़ा": "ख़रबूज़ा", "खरबूजा": "ख़रबूज़ा", "खरबूजे": "ख़रबूज़ा",
     "खीरा": "खीरा", "खीरे": "खीरा", "खीरों": "खीरा",
     "खुत्ती": "खुत्ती",
-    "खेत": "खेत",
+    # "खेत" removed — too generic, causes false crop detection on "खेती कैसे करें"
     "खेत में दीमक": "खेत में दीमक",
     "गंजी": "गंजी",
     "गंधाराब्राज": "गंधाराब्राज",
@@ -180,7 +180,7 @@ CROP_ALIASES: dict[str, str] = {
     "पोई": "पोई",
     "प्याज़": "प्याज़", "प्याज": "प्याज़", "प्याजों": "प्याज़",
     "फल": "फल",
-    "फसल": "फसल",
+    # "फसल" and "खेत" removed — too generic, cause false crop detection
     "फालसा": "फालसा",
     "फासबीन": "फासबीन",
     "फूल": "फूल",
@@ -436,27 +436,16 @@ def classify_query(query: str) -> str:
     Classify query intent before searching.
 
     Returns:
-        "problem"  — query describes a crop problem (proceed to search)
-        "general"  — general how-to / informational question (skip search)
+        "problem"  — proceed to search
+        "general"  — skip search, return support message
 
-    Three-layer logic (checked in order, first match wins):
-
-      Layer 1 — SYMPTOM keywords (SYMPTOM_KEYWORDS dict)
-                Any symptom word → always "problem"
-                e.g. "केले में कीड़े", "पत्ते पीले"
-
-      Layer 2 — PROBLEM CONTEXT words (PROBLEM_CONTEXT_WORDS list)
-                Damage/protection/disease words → always "problem"
-                Catches how-to problem queries like:
-                  "पाले से कैसे बचायें" → बचायें = problem context → "problem"
-                  "पीले पत्तों का उपाय" → उपाय = problem context → "problem"
-
-      Layer 3 — GENERAL indicators (GENERAL_QUERY_INDICATORS list)
-                Only reaches here if layers 1 and 2 both missed.
-                Specific cultivation/farming phrases → "general"
-                e.g. "खेती कैसे करें", "केले कैसे उगाएं"
-
-      Default → "problem" (give benefit of doubt, let threshold handle it)
+    Logic:
+      Layer 1 — SYMPTOM keywords → always "problem"
+      Layer 2 — PROBLEM_CONTEXT words → always "problem"
+      Layer 3 — GENERAL indicators WITH no crop detected → "general"
+                If a crop IS detected, always search — the DB may have
+                a record for that exact question (e.g. "केले की खेती कैसे करें?")
+      Default  → "problem"
     """
     query_lower = query.lower()
 
@@ -472,13 +461,21 @@ def classify_query(query: str) -> str:
             logger.info(f"Query classified as 'problem' (problem context: '{word}')")
             return "problem"
 
-    # Layer 3: clearly general farming/cultivation phrases
+    # Layer 3: general indicator — only block if NO crop is detected
+    # If a crop IS present, the DB may have that exact record → always search
     for indicator in GENERAL_QUERY_INDICATORS:
         if indicator in query_lower:
-            logger.info(f"Query classified as 'general' (indicator: '{indicator}')")
-            return "general"
+            detected = detect_crop(query)
+            if not detected:
+                logger.info(f"Query classified as 'general' (indicator: '{indicator}', no crop)")
+                return "general"
+            else:
+                logger.info(
+                    f"General indicator '{indicator}' found but crop '{detected}' detected "
+                    f"— searching DB (record may exist)"
+                )
+                return "problem"
 
-    # Default: treat as problem, let confidence threshold filter poor matches
     return "problem"
 
 
