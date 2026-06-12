@@ -38,7 +38,7 @@
 | Framework                | Django 5.0.6                               |
 | Database                 | PostgreSQL + pgvector                      |
 | Primary language support | Hindi + English                            |
-| Embedding dimensions     | 384                                        |
+| Embedding dimensions     | 768                                        |
 | Number of crop solutions | 1500+                                      |
 | Voice support            | Offline Hindi STT (Vosk)                   |
 | Deployment               | Render.com                                 |
@@ -79,7 +79,7 @@
 │  │            │ │    .py          │ │     .py         │            │
 │  │ detect_crop│ │ SentenceTrans-  │ │  Vosk Kaldi     │            │
 │  │ hybrid_    │ │ formers Model   │ │  Hindi STT      │            │
-│  │ search     │ │ (384-dim)       │ │                 │            │
+│   │ search     │ │ (768-dim)       │ │                 │            │
 │  └──────┬─────┘ └────────┬────────┘ └─────────────────┘            │
 │         │                │                                           │
 └─────────┼────────────────┼───────────────────────────────────────────┘
@@ -90,7 +90,7 @@
 │                                                                      │
 │   solutions table                                                    │
 │   ┌──────────┬──────────┬──────────┬──────────────────────────┐    │
-│   │ id (PK)  │ cropname │ problem  │ embedding (vector 384)    │    │
+│   │ id (PK)  │ cropname │ problem  │ embedding (vector 768)    │    │
 │   │          │          │          │ solution                  │    │
 │   └──────────┴──────────┴──────────┴──────────────────────────┘    │
 │                                                                      │
@@ -133,10 +133,10 @@
            ▼
   ┌─────────────────────────────┐
   │   generate_embedding()      │  ← SentenceTransformer
-  │   paraphrase-multilingual   │    384-dim vector
+  │   paraphrase-multilingual   │    768-dim vector
   │   MiniLM-L12-v2             │
   └────────┬────────────────────┘
-           │ query_vector [384 floats]
+           │ query_vector [768 floats]
            ▼
   ┌─────────────────────────────┐
   │   pgvector cosine search    │  ← PostgreSQL
@@ -257,7 +257,7 @@
 │ cropname     │ VARCHAR(500)  NOT NULL  INDEX                  │
 │ problem      │ TEXT  NOT NULL                                 │
 │ solution     │ TEXT  NOT NULL                                 │
-│ embedding    │ VECTOR(384)  NULLABLE                          │
+│   embedding    │ VECTOR(768)  NULLABLE                          │
 └──────────────┴───────────────────────────────────────────────┘
         │
         │  IVFFLAT INDEX
@@ -315,7 +315,7 @@ Browser          Django Router     SearchView       services.py      PostgreSQL
    │                  │                │─ search_crop_solution() ────────►│
    │                  │                │                 │                │
    │                  │                │                 │─ embed query ──┤
-   │                  │                │                 │  [384 floats]  │
+   │                  │                │                 │  [768 floats]  │
    │                  │                │                 │                │
    │                  │                │                 │─ pgvector SQL ►│
    │                  │                │                 │  cosine search │
@@ -473,7 +473,7 @@ ThirdPartyPage      Browser            kisan-widget.js    Django API
 | Model name          | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`  |
 | Provider            | HuggingFace / sentence-transformers                            |
 | Architecture        | MiniLM (12-layer transformer)                                  |
-| Output dimensions   | 384 floats                                                     |
+| Output dimensions   | 768 floats                                                     |
 | Languages supported | 50+ (including Hindi, English)                                 |
 | Model size on disk  | ~470 MB                                                        |
 | Runtime device      | CPU                                                            |
@@ -521,7 +521,7 @@ Query
   │    Examples: "टमाटरों" → "टमाटर", "tomatoes" → "टमाटर"
   │
   ├─── Step 2: Vector Search (pgvector) ───────────────────────────────
-  │    generate_embedding(query)  →  384-dim float vector
+  │    generate_embedding(query)  →  768-dim float vector
   │
   │    SQL (with crop filter):
   │      SELECT id, problem, solution, cropname,
@@ -706,7 +706,7 @@ CREATE TABLE solutions (
     cropname  VARCHAR(500) NOT NULL,
     problem   TEXT NOT NULL,
     solution  TEXT NOT NULL,
-    embedding VECTOR(384)           -- 384-dim cosine-normalized float array
+    embedding VECTOR(768)           -- 768-dim cosine-normalized float array
 );
 
 -- Index for fast approximate nearest-neighbour search
