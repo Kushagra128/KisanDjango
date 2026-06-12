@@ -17,6 +17,7 @@ FastAPI route → Django path:
 
 from django.urls import path
 from . import views
+from . import metrics
 
 urlpatterns = [
     path("", views.ChatbotView.as_view(), name="chatbot"),
@@ -27,4 +28,5 @@ urlpatterns = [
     path("search", views.SearchView.as_view(), name="search"),
     path("voice", views.VoiceView.as_view(), name="voice"),
     path("voice-search", views.VoiceSearchView.as_view(), name="voice-search"),
+    path("metrics", metrics.MetricsView.as_view(), name="metrics"),
 ]

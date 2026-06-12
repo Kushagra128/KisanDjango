@@ -83,6 +83,8 @@ def _result_to_dict(item, detected_crop=None):
         "similarity_score": getattr(item, "similarity_score", None),
         "search_method": getattr(item, "search_method", None),
         "detected_crop": detected_crop or getattr(item, "detected_crop", None),
+        "confidence": getattr(item, "confidence", None),
+        "solution_count": getattr(item, "solution_count", 1),  # Include frequency count
     }
 
 
@@ -146,15 +148,31 @@ class InitDbView(APIView):
 
                 # Create IVFFLAT index if absent
                 cursor.execute(
-                    "SELECT 1 FROM pg_indexes WHERE indexname = 'solutions_embedding_idx'"
+                    "SELECT 1 FROM pg_indexes WHERE indexname = 'pesti_comp_embedding_idx'"
                 )
                 if not cursor.fetchone():
                     cursor.execute(
-                        "CREATE INDEX solutions_embedding_idx "
-                        "ON solutions USING ivfflat (embedding vector_cosine_ops) "
+                        "CREATE INDEX pesti_comp_embedding_idx "
+                        "ON pesti_comp USING ivfflat (embedding vector_cosine_ops) "
                         "WITH (lists = 100)"
                     )
-            return Response({"message": "pgvector extension enabled and index created."})
+
+                # Try HNSW index for better recall (pgvector 0.5+)
+                try:
+                    cursor.execute(
+                        "SELECT 1 FROM pg_indexes WHERE indexname = 'pesti_comp_embedding_hnsw_idx'"
+                    )
+                    if not cursor.fetchone():
+                        cursor.execute(
+                            "CREATE INDEX pesti_comp_embedding_hnsw_idx "
+                            "ON pesti_comp USING hnsw (embedding vector_cosine_ops) "
+                            "WITH (m = 16, ef_construction = 200)"
+                        )
+                        logger.info("Created HNSW index for vector search")
+                except Exception as hnsw_err:
+                    logger.info("HNSW index not available (pgvector < 0.5): %s", hnsw_err)
+
+            return Response({"message": "pgvector extension enabled and indexes created."})
         except Exception as exc:
             logger.error("init-db error: %s", exc, exc_info=True)
             return Response({"message": str(exc)}, status=500)
@@ -177,7 +195,7 @@ class GenerateEmbeddingsView(APIView):
         try:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT id, cropname, problem FROM solutions WHERE embedding IS NULL"
+                    "SELECT id, cropname, problem FROM pesti_comp WHERE embedding IS NULL"
                 )
                 records = cursor.fetchall()
 
@@ -196,7 +214,7 @@ class GenerateEmbeddingsView(APIView):
                     if emb:
                         with connection.cursor() as cursor:
                             cursor.execute(
-                                "UPDATE solutions SET embedding = %s WHERE id = %s",
+                                "UPDATE pesti_comp SET embedding = %s WHERE id = %s",
                                 [str(emb), record_id],
                             )
                         processed += 1
@@ -236,18 +254,19 @@ class SearchView(APIView):
     GET  /search?q=<query>   → returns top-10 results
     POST /search  {"q": ...} → returns top-1 result (chatbot mode)
     """
+    throttle_scope = "search"
 
     def _run_search(self, query: str):
         """
         Shared search logic.
-        Returns (detected_crop, None) on success path,
-        or (None, error_Response) if query is invalid.
+        Returns (detected_crop, suggestions, error_Response) on success path,
+        or (None, None, error_Response) if query is invalid.
         General queries and no-crop queries both get the support message.
         """
         # Fix 1: classify intent — general questions skip search entirely
         intent = services.classify_query(query)
         if intent == "general":
-            return None, Response(
+            return None, None, Response(
                 {
                     "message": services.NO_ANSWER_MESSAGE,
                     "query": query,
@@ -258,7 +277,8 @@ class SearchView(APIView):
 
         detected_crop = services.detect_crop(query)
         if not detected_crop:
-            return None, Response(
+            suggestions = services.get_crop_suggestions(query)
+            return None, None, Response(
                 {
                     "message": (
                         "फसल का नाम स्पष्ट नहीं है। कृपया अपने प्रश्न में फसल का नाम लिखें।\n"
@@ -267,10 +287,31 @@ class SearchView(APIView):
                     ),
                     "query": query,
                     "type": "no_crop_detected",
+                    "suggestions": suggestions,
                 },
                 status=200,
             )
-        return detected_crop, None
+
+        # Block multi-crop queries — search pipeline assumes one crop at a time
+        all_crops = services.detect_all_crops(query)
+        if len(all_crops) > 1:
+            crop_list = ", ".join(all_crops)
+            return None, None, Response(
+                {
+                    "message": (
+                        f"आपने एक साथ कई फ़सलें पूछी हैं: {crop_list}\n"
+                        "कृपया एक समय में केवल एक ही फ़सल के बारे में पूछें।\n"
+                        "उदाहरण: 'आम में कीड़े लग गए हैं' या 'अमरुद की खेती कैसे करें'\n\n"
+                        + services.NO_ANSWER_MESSAGE
+                    ),
+                    "query": query,
+                    "type": "multi_crop",
+                    "detected_crops": all_crops,
+                },
+                status=200,
+            )
+
+        return detected_crop, [], None
 
     @extend_schema(
         parameters=[
@@ -291,7 +332,7 @@ class SearchView(APIView):
 
         start = time.time()
         try:
-            detected_crop, err = self._run_search(query)
+            detected_crop, _, err = self._run_search(query)
             if err:
                 return err
 
@@ -334,7 +375,7 @@ class SearchView(APIView):
 
     @extend_schema(
         request=SearchPostSerializer,
-        responses=SolutionResponseSerializer,
+        responses=SolutionResponseSerializer(many=True),  # Returns array of solution objects
     )
     def post(self, request):
         query = (request.data.get("q") or "").strip()
@@ -343,10 +384,11 @@ class SearchView(APIView):
 
         start = time.time()
         try:
-            detected_crop, err = self._run_search(query)
+            detected_crop, _, err = self._run_search(query)
             if err:
                 return err
 
+            # Get top 10 results (will be grouped by solution frequency)
             results = services.search_crop_solution(None, query)
             elapsed = time.time() - start
 
@@ -359,7 +401,10 @@ class SearchView(APIView):
             )
 
             if results:
-                return Response(_result_to_dict(results[0], detected_crop))
+                # Return top 3 complete solution objects with counts
+                top_3_results = [_result_to_dict(item, detected_crop) for item in results[:3]]
+                
+                return Response(top_3_results)
 
             return Response(
                 {
@@ -392,6 +437,7 @@ class VoiceView(APIView):
     Limited by _voice_semaphore to MAX_CONCURRENT_VOICE simultaneous calls.
     Returns 503 immediately if the semaphore is exhausted.
     """
+    throttle_scope = "voice"
 
     parser_classes = [MultiPartParser]
 
@@ -483,6 +529,7 @@ class VoiceSearchView(APIView):
     Combines VoiceView + SearchView in a single request.
     Same concurrency limit as VoiceView.
     """
+    throttle_scope = "voice"
 
     parser_classes = [MultiPartParser]
 
@@ -507,7 +554,7 @@ class VoiceSearchView(APIView):
             name="VoiceSearchResponse",
             fields={
                 "transcript": serializers.CharField(),
-                "result": SolutionResponseSerializer(),
+                "result": SolutionResponseSerializer(),  # Returns single object
             },
         ),
     )
@@ -577,14 +624,16 @@ class VoiceSearchView(APIView):
             )
 
             if results:
+                # Return top 1 result (best match only)
+                top_result = results[0]
                 return Response(
-                    {"transcript": transcript, "result": _result_to_dict(results[0], detected_crop)}
+                    {"transcript": transcript, "result": _result_to_dict(top_result, detected_crop)}
                 )
 
             return Response(
                 {
                     "transcript": transcript,
-                    "result": None,
+                    "results": [],
                     "message": services.NO_ANSWER_MESSAGE,
                     "type": "no_result",
                 },

@@ -15,6 +15,7 @@ pgvector==0.4.2              # pgvector-django uses this package
 
 # ── Environment ───────────────────────────────────────────────────────────────
 python-dotenv==1.1.0
+python-json-logger==3.3.0      # structured JSON logging for production
 python-multipart==0.0.20     # for file upload handling
 
 # ── Semantic search ───────────────────────────────────────────────────────────
@@ -22,6 +23,10 @@ sentence-transformers==3.4.1
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.6.0+cpu
 numpy==1.26.4
+einops==0.8.2                # Required for Nomic Embed Text model
 
 # ── Voice STT (offline Hindi) ─────────────────────────────────────────────────
 vosk==0.3.45
+
+# ── Load testing ─────────────────────────────────────────────────────────────
+locust==2.32.5

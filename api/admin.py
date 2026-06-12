@@ -1,7 +1,7 @@
 """
 api/admin.py
 
-Django admin panel for the Kisan AI solutions database.
+Django admin panel for the Kisan AI pesti_comp database.
 
 Features (as specified in FASTAPI_VS_DJANGO.md § 11):
   List view:
@@ -195,7 +195,7 @@ class SolutionAdmin(admin.ModelAdmin):
     @admin.action(description="Export selected records to CSV")
     def export_csv_action(self, request, queryset):
         response = HttpResponse(content_type="text/csv; charset=utf-8-sig")
-        response["Content-Disposition"] = 'attachment; filename="solutions.csv"'
+        response["Content-Disposition"] = 'attachment; filename="pesti_comp.csv"'
 
         writer = csv.writer(response)
         writer.writerow(["id", "cropname", "problem", "solution", "has_embedding"])

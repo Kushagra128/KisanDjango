@@ -262,6 +262,60 @@ After creating a superuser, log in at `/admin/`:
 
 ---
 
+## Testing & Accuracy Validation
+
+The project includes a comprehensive testing framework to measure and monitor search accuracy.
+
+### Quick Test (5 queries, ~1 second)
+
+```bash
+python test_quick.py
+```
+
+Tests 5 sample queries covering cultivation, pest, and disease scenarios. Use this for rapid validation during development.
+
+### Full Accuracy Test (320 queries, ~5 minutes)
+
+```bash
+python test_accuracy.py
+```
+
+Runs all 320 test cases from `adv-data-test.csv` and generates detailed reports:
+
+- `accuracy_report.txt` — Human-readable summary with failed cases
+- `test_results.json` — Complete results in JSON format
+
+### View Results
+
+```bash
+# Show summary statistics
+python view_results.py summary
+
+# Show failed test cases
+python view_results.py failures
+
+# Show results by difficulty
+python view_results.py easy
+python view_results.py medium
+python view_results.py hard
+
+# Show top/lowest scoring queries
+python view_results.py top low
+```
+
+### Expected Performance
+
+With all improvements implemented:
+
+- **Overall Accuracy**: >85%
+- **Easy Cases**: >90%
+- **Medium Cases**: >85%
+- **Hard Cases**: >75%
+
+See `TESTING.md` for detailed documentation on the testing framework.
+
+---
+
 ## Production Deployment (Render)
 
 1. Push code to GitHub

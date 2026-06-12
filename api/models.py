@@ -1,7 +1,7 @@
 """
 api/models.py
 
-Django ORM model for the existing `solutions` table.
+Django ORM model for the existing `pesti_comp` table.
 
 Key design decisions:
   - managed = False  → Django will NOT create/drop this table.
@@ -24,15 +24,15 @@ logger = logging.getLogger(__name__)
 
 
 class Solution(models.Model):
-    """Crop problem → solution record, mirroring the `solutions` PostgreSQL table."""
+    """Crop problem → solution record, mirroring the `pesti_comp` PostgreSQL table."""
 
     problem = models.TextField()
     solution = models.TextField()
     cropname = models.CharField(max_length=500, db_index=True)
-    embedding = VectorField(dimensions=384, null=True, blank=True)
+    embedding = VectorField(dimensions=768, null=True, blank=True)
 
     class Meta:
-        db_table = "solutions"
+        db_table = "pesti_comp"
         managed = False          # Don't let Django touch the existing table schema
         ordering = ["cropname", "id"]
         verbose_name = "Solution"

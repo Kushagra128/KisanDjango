@@ -16,6 +16,19 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 
+# ── Production safety checks ──────────────────────────────────────────────────
+if not DEBUG:
+    if SECRET_KEY == "django-insecure-change-me-in-production":
+        raise RuntimeError(
+            "DJANGO_SECRET_KEY is set to the insecure default. "
+            "Generate a secure key and set it in your .env file."
+        )
+    if "*" in ALLOWED_HOSTS:
+        raise RuntimeError(
+            "ALLOWED_HOSTS='*' is not allowed in production. "
+            "Set specific hosts in your .env file."
+        )
+
 # ── Application definition ────────────────────────────────────────────────────
 
 INSTALLED_APPS = [
@@ -32,6 +45,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "api.middleware.RequestIdMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -81,6 +95,9 @@ if DATABASE_URL:
     DATABASES = {"default": dj_database_url.parse(url, conn_max_age=600)}
     # Force psycopg3 driver
     DATABASES["default"]["ENGINE"] = "django.db.backends.postgresql"
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+    # conn_max_age=600 (above) provides persistent-connection pooling.
+    # psycopg3 uses psycopg_pool for server-side pooling; not needed at dev scale.
 else:
     # Fallback: build from individual env vars
     DATABASES = {
@@ -122,7 +139,19 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 
-CORS_ALLOW_ALL_ORIGINS = True  # In production, replace with CORS_ALLOWED_ORIGINS list
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOWED_ORIGINS = [
+        origin.strip()
+        for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    if not CORS_ALLOWED_ORIGINS:
+        raise RuntimeError(
+            "CORS_ALLOWED_ORIGINS must be set when DEBUG=False. "
+            "Add comma-separated allowed origins to your .env file."
+        )
 
 # ── Django REST Framework ─────────────────────────────────────────────────────
 
@@ -139,11 +168,35 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [],
     "EXCEPTION_HANDLER": "api.exceptions.custom_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "120/minute",
+        "search": "180/minute",
+        "voice": "30/minute",
+    },
 }
 
 # ── Voice / ML settings ───────────────────────────────────────────────────────
 
 MAX_CONCURRENT_VOICE = int(os.getenv("MAX_CONCURRENT_REQUESTS", "10"))
+
+# ── Security hardening ────────────────────────────────────────────────────────
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -155,11 +208,15 @@ LOGGING = {
             "format": "{levelname} {asctime} {module} {message}",
             "style": "{",
         },
+        "json": {
+            "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
+            "format": "%(asctime)s %(levelname)s %(name)s %(module)s %(message)s",
+        },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "verbose",
+            "formatter": "json" if not DEBUG else "verbose",
         },
     },
     "root": {

@@ -23,13 +23,15 @@ def _resolve_cache_dir() -> str:
       1. SENTENCE_TRANSFORMERS_HOME env var  (set by manage.py / wsgi.py)
       2. CACHE_DIR env var  (legacy / deployment override)
       3. .cache/sentence_transformers inside the project root
+    
+    Always returns an absolute path to avoid Windows path issues.
     """
     if os.environ.get("SENTENCE_TRANSFORMERS_HOME"):
-        return os.environ["SENTENCE_TRANSFORMERS_HOME"]
+        return os.path.abspath(os.environ["SENTENCE_TRANSFORMERS_HOME"])
     if os.environ.get("CACHE_DIR"):
-        return os.environ["CACHE_DIR"]
+        return os.path.abspath(os.environ["CACHE_DIR"])
     project_root = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(project_root, ".cache", "sentence_transformers")
+    return os.path.abspath(os.path.join(project_root, ".cache", "sentence_transformers"))
 
 
 class EmbeddingGenerator:
@@ -41,12 +43,44 @@ class EmbeddingGenerator:
     - _infer_lock : serialises model.encode() calls so concurrent requests
                     don't corrupt each other's numpy buffers
     - Singleton   : one model instance shared across all requests (~420 MB)
+    
+    Supported models:
+    1. paraphrase-multilingual-MiniLM-L12-v2 (384 dims, 128 tokens context) - Default
+    2. paraphrase-multilingual-mpnet-base-v2 (768 dims, 128 tokens context)
+    3. nomic-ai/nomic-embed-text-v1.5 (768 dims, 8192 tokens context) - Recommended
+    
+    Set model via EMBEDDING_MODEL environment variable.
     """
 
     _instance: Optional["EmbeddingGenerator"] = None
 
-    MODEL_NAME        = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    EMBEDDING_DIM     = 384
+    # Model configuration
+    AVAILABLE_MODELS = {
+        "minilm": {
+            "name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "dims": 384,
+            "context": 128,
+            "size_mb": 470,
+        },
+        "mpnet": {
+            "name": "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+            "dims": 768,
+            "context": 128,
+            "size_mb": 470,
+        },
+        "nomic": {
+            "name": "nomic-ai/nomic-embed-text-v1.5",
+            "dims": 768,
+            "context": 8192,
+            "size_mb": 548,
+        },
+    }
+    
+    # Model selection - deferred to _get_model_config() to allow dotenv to load first
+    MODEL_KEY = None
+    _config = None
+    MODEL_NAME = None
+    EMBEDDING_DIM = None
     MAX_TEXT_CHARS    = 10_000
     WARN_LATENCY_MS   = 300
 
@@ -64,6 +98,26 @@ class EmbeddingGenerator:
         self._model: Optional[SentenceTransformer] = None
         self._load_lock  = threading.Lock()
         self._infer_lock = threading.Lock()
+        self._ensure_config()
+    
+    def _ensure_config(self):
+        """Ensure model configuration is loaded (deferred until after dotenv)"""
+        if self.MODEL_KEY is not None:
+            return  # Already configured
+        
+        # Read from environment
+        model_key = os.getenv("EMBEDDING_MODEL", "minilm").lower()
+        
+        # Validate
+        if model_key not in self.AVAILABLE_MODELS:
+            logger.warning(f"Unknown EMBEDDING_MODEL '{model_key}', falling back to 'minilm'")
+            model_key = "minilm"
+        
+        # Set class variables
+        EmbeddingGenerator.MODEL_KEY = model_key
+        EmbeddingGenerator._config = self.AVAILABLE_MODELS[model_key]
+        EmbeddingGenerator.MODEL_NAME = EmbeddingGenerator._config["name"]
+        EmbeddingGenerator.EMBEDDING_DIM = EmbeddingGenerator._config["dims"]
 
     # ── Model loading ─────────────────────────────────────────────────────────
 
@@ -72,6 +126,9 @@ class EmbeddingGenerator:
         if self.DISABLE:
             logger.warning("Embeddings disabled (DISABLE_EMBEDDINGS=true). Keyword-only search active.")
             return
+        
+        # Ensure config is loaded first
+        self._ensure_config()
 
         if self._model is not None:
             return
@@ -104,23 +161,56 @@ class EmbeddingGenerator:
         - TensorFlow weights (~0.4GB)
 
         and only downloads the files actually needed for inference.
+        
+        For Nomic models, uses trust_remote_code=True to load custom architecture.
         """
 
-        logger.info(f"Loading model: {self.MODEL_NAME}")
+        logger.info(f"Loading model: {self.MODEL_NAME} ({self.EMBEDDING_DIM} dims)")
+
+        # Nomic models require trust_remote_code=True
+        kwargs = {
+            "cache_folder": cache_dir,
+            "device": "cpu",
+        }
+        
+        if "nomic" in self.MODEL_NAME:
+            kwargs["trust_remote_code"] = True
+            logger.info("Nomic model detected - enabling trust_remote_code")
 
         model = SentenceTransformer(
             self.MODEL_NAME,
-            cache_folder=cache_dir,
-            device="cpu",
+            **kwargs
         )
 
         model.eval()
         self._model = model
 
-        logger.info("✅ Model loaded successfully on CPU.")
+        # Warm up: run one dummy inference to prime PyTorch JIT/caches
+        # so the first real request isn't slow
+        try:
+            _ = model.encode("warmup", convert_to_numpy=True, normalize_embeddings=True)
+            logger.info("Model warm-up complete.")
+        except Exception as warmup_err:
+            logger.warning("Model warm-up skipped: %s", warmup_err)
+
+        logger.info(f"✅ Model loaded successfully on CPU (dims={self.EMBEDDING_DIM}, "
+                   f"context={self._config['context']} tokens).")
 
     def is_model_loaded(self) -> bool:
         return self._model is not None
+    
+    def get_model_info(self) -> dict:
+        """Return information about the current model configuration."""
+        self._ensure_config()
+        return {
+            "model_key": self.MODEL_KEY,
+            "model_name": self.MODEL_NAME,
+            "embedding_dim": self.EMBEDDING_DIM,
+            "max_context_tokens": self._config["context"],
+            "model_size_mb": self._config["size_mb"],
+            "loaded": self.is_model_loaded(),
+            "disabled": self.DISABLE,
+        }
 
     # ── Single embedding ──────────────────────────────────────────────────────
 
